@@ -7,6 +7,61 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAddTargetWithMultipleWildCard(t *testing.T) {
+	r := require.New(t)
+	tbl := NewTable()
+	host := "*.*.testhost"
+	tgt := Target{}
+	err := tbl.AddTarget(host, tgt)
+	r.Error(err)
+}
+
+func TestAddTargetWithBadWildCardPosition(t *testing.T) {
+	r := require.New(t)
+	tbl := NewTable()
+	host := "subhost.*.testhost"
+	tgt := Target{}
+	err := tbl.AddTarget(host, tgt)
+	r.Error(err)
+}
+
+func TestAddTargetWithoutWildCard(t *testing.T) {
+	r := require.New(t)
+	tbl := NewTable()
+	host := "testhost"
+	tgt := Target{}
+	err := tbl.AddTarget(host, tgt)
+	r.NoError(err)
+}
+
+func TestMultipleHostsWithWildcard(t *testing.T) {
+	r := require.New(t)
+	tbl := NewTable()
+
+	host := "*.testhost"
+	tgt := Target{}
+	err := tbl.AddTarget(host, tgt)
+	r.NoError(err)
+
+	host = "*.testhost"
+	err = tbl.AddTarget(host, tgt)
+	r.Error(err)
+
+	host = "subhost.testhost"
+	err = tbl.AddTarget(host, tgt)
+	r.Error(err)
+	_, err = tbl.Lookup(host)
+	r.NoError(err)
+	r.Equal(len(tbl.m), 1)
+
+	host = "subhost.testhostt"
+	err = tbl.AddTarget(host, tgt)
+	r.NoError(err)
+	_, err = tbl.Lookup(host)
+	r.NoError(err)
+	r.Equal(len(tbl.m), 2)
+}
+
 func TestTableJSONRoundTrip(t *testing.T) {
 	const host = "testhost"
 	r := require.New(t)

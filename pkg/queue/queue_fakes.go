@@ -2,6 +2,7 @@ package queue
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -30,7 +31,12 @@ func NewFakeCounter() *FakeCounter {
 
 func (f *FakeCounter) Resize(host string, i int) error {
 	f.mapMut.Lock()
-	f.RetMap[host] += i
+	if k, err := f.Lookup(host); err == ErrTargetNotFound {
+		f.RetMap[host] += i
+	} else {
+		f.RetMap[k] += i
+	}
+
 	f.mapMut.Unlock()
 	select {
 	case f.ResizedCh <- HostAndCount{Host: host, Count: i}:
@@ -46,15 +52,20 @@ func (f *FakeCounter) Resize(host string, i int) error {
 func (f *FakeCounter) Ensure(host string) {
 	f.mapMut.Lock()
 	defer f.mapMut.Unlock()
-	f.RetMap[host] = 0
+	k, err := f.Lookup(host)
+	if err == ErrTargetNotFound {
+		f.RetMap[host] = 0
+		return
+	}
+	f.RetMap[k] = 0
 }
 
 func (f *FakeCounter) Remove(host string) bool {
 	f.mapMut.Lock()
 	defer f.mapMut.Unlock()
-	_, ok := f.RetMap[host]
-	delete(f.RetMap, host)
-	return ok
+	k, ok := f.Lookup(host)
+	delete(f.RetMap, k)
+	return ok == nil
 }
 
 func (f *FakeCounter) Current() (*Counts, error) {
@@ -82,4 +93,16 @@ func (f *FakeCountReader) Current() (*Counts, error) {
 		"sample.com": f.current,
 	}
 	return ret, f.err
+}
+
+func (f *FakeCounter) Lookup(host string) (string, error) {
+	if _, ok := f.RetMap[host]; ok {
+		return host, nil
+	}
+	for k := range f.RetMap {
+		if matched, _ := regexp.MatchString(k, host); matched {
+			return k, nil
+		}
+	}
+	return "", ErrTargetNotFound
 }

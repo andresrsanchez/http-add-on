@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 )
 
@@ -87,11 +89,11 @@ func (t *Table) UnmarshalJSON(data []byte) error {
 func (t *Table) Lookup(host string) (Target, error) {
 	t.l.RLock()
 	defer t.l.RUnlock()
-	ret, ok := t.m[host]
-	if !ok {
-		return Target{}, ErrTargetNotFound
+	k, err := t.lookup(host)
+	if err != nil {
+		return Target{}, err
 	}
-	return ret, nil
+	return t.m[k], nil
 }
 
 // AddTarget registers target for host in the routing table t
@@ -102,17 +104,24 @@ func (t *Table) AddTarget(
 	host string,
 	target Target,
 ) error {
+	n := strings.Count(host, "*")
+	if n > 0 && (!strings.HasPrefix(host, "*") || n > 1) {
+		return fmt.Errorf("invalid wildcard for host %s", host)
+	} else if n > 0 {
+		host = "^" + strings.Replace(host, "*", "[a-zA-Z0-9-]+", 1) + "$"
+	}
+
 	t.l.Lock()
 	defer t.l.Unlock()
-	_, ok := t.m[host]
-	if ok {
-		return fmt.Errorf(
-			"host %s is already registered in the routing table",
-			host,
-		)
+	_, err := t.lookup(host)
+	if err == ErrTargetNotFound {
+		t.m[host] = target
+		return nil
 	}
-	t.m[host] = target
-	return nil
+	return fmt.Errorf(
+		"host %s is already registered in the routing table",
+		host,
+	)
 }
 
 // RemoveTarget removes host, if it exists, and its corresponding Target entry in
@@ -120,11 +129,11 @@ func (t *Table) AddTarget(
 func (t *Table) RemoveTarget(host string) error {
 	t.l.Lock()
 	defer t.l.Unlock()
-	_, ok := t.m[host]
-	if !ok {
+	k, err := t.lookup(host)
+	if err == ErrTargetNotFound {
 		return fmt.Errorf("host %s did not exist in the routing table", host)
 	}
-	delete(t.m, host)
+	delete(t.m, k)
 	return nil
 }
 
@@ -137,4 +146,16 @@ func (t *Table) Replace(newTable *Table) {
 	t.l.Lock()
 	defer t.l.Unlock()
 	t.m = newTable.m
+}
+
+func (t *Table) lookup(host string) (string, error) {
+	if _, ok := t.m[host]; ok {
+		return host, nil
+	}
+	for k := range t.m {
+		if matched, _ := regexp.MatchString(k, host); matched {
+			return k, nil
+		}
+	}
+	return "", ErrTargetNotFound
 }

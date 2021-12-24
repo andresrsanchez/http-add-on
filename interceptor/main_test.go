@@ -26,8 +26,9 @@ import (
 
 func TestRunProxyServerCountMiddleware(t *testing.T) {
 	const (
-		port = 8080
-		host = "samplehost"
+		port    = 8080
+		host    = "*.samplehost"
+		subhost = "subhost.samplehost"
 	)
 	r := require.New(t)
 	ctx, done := context.WithCancel(
@@ -93,7 +94,7 @@ func TestRunProxyServerCountMiddleware(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		req.Host = host
+		req.Host = subhost
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
@@ -109,7 +110,8 @@ func TestRunProxyServerCountMiddleware(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	select {
 	case hostAndCount := <-q.ResizedCh:
-		r.Equal(host, hostAndCount.Host)
+		matchedHost, _ := q.Lookup(hostAndCount.Host)
+		r.Equal(matchedHost, hostAndCount.Host)
 		r.Equal(+1, hostAndCount.Count)
 	case <-time.After(500 * time.Millisecond):
 		r.Fail("timeout waiting for +1 queue resize")
@@ -120,7 +122,8 @@ func TestRunProxyServerCountMiddleware(t *testing.T) {
 
 	select {
 	case hostAndCount := <-q.ResizedCh:
-		r.Equal(host, hostAndCount.Host)
+		matchedHost, _ := q.Lookup(hostAndCount.Host)
+		r.Equal(matchedHost, hostAndCount.Host)
 		r.Equal(-1, hostAndCount.Count)
 	case <-time.After(500 * time.Millisecond):
 		r.Fail("timeout waiting for -1 queue resize")
@@ -131,13 +134,13 @@ func TestRunProxyServerCountMiddleware(t *testing.T) {
 	r.NoError(err)
 	counts := countsPtr.Counts
 	r.Equal(1, len(counts))
-	_, foundHost := counts[host]
+	_, foundHost := counts[subhost]
 	r.True(
 		foundHost,
 		"couldn't find host %s in the queue",
 		host,
 	)
-	r.Equal(0, counts[host])
+	r.Equal(0, counts[subhost])
 
 	done()
 	r.Error(g.Wait())

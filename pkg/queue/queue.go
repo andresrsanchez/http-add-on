@@ -1,8 +1,12 @@
 package queue
 
 import (
+	"errors"
+	"regexp"
 	"sync"
 )
+
+var ErrTargetNotFound = errors.New("Target not found")
 
 // CountReader represents the size of a virtual HTTP queue, possibly
 // distributed across multiple HTTP server processes. It only can access
@@ -59,25 +63,30 @@ func NewMemory() *Memory {
 func (r *Memory) Resize(host string, delta int) error {
 	r.mut.Lock()
 	defer r.mut.Unlock()
-	r.countMap[host] += delta
+	if k, err := r.lookup(host); err == ErrTargetNotFound {
+		r.countMap[host] += delta
+	} else {
+		r.countMap[k] += delta
+	}
 	return nil
 }
 
 func (r *Memory) Ensure(host string) {
 	r.mut.Lock()
 	defer r.mut.Unlock()
-	_, ok := r.countMap[host]
-	if !ok {
+	if k, err := r.lookup(host); err == ErrTargetNotFound {
 		r.countMap[host] = 0
+	} else {
+		r.countMap[k] = 0
 	}
 }
 
 func (r *Memory) Remove(host string) bool {
 	r.mut.Lock()
 	defer r.mut.Unlock()
-	_, ok := r.countMap[host]
-	delete(r.countMap, host)
-	return ok
+	k, err := r.lookup(host)
+	delete(r.countMap, k)
+	return err == nil
 }
 
 // Current returns the current size of the queue.
@@ -87,4 +96,16 @@ func (r *Memory) Current() (*Counts, error) {
 	cts := NewCounts()
 	cts.Counts = r.countMap
 	return cts, nil
+}
+
+func (r *Memory) lookup(host string) (string, error) {
+	if _, ok := r.countMap[host]; ok {
+		return host, nil
+	}
+	for k := range r.countMap {
+		if matched, _ := regexp.MatchString(k, host); matched {
+			return k, nil
+		}
+	}
+	return "", ErrTargetNotFound
 }
